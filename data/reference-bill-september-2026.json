@@ -1,0 +1,20 @@
+{
+  "kind": "user_supplied_bill_observation",
+  "billing_month": "2026-09",
+  "units": "744",
+  "previous_reading": "77739",
+  "current_reading": "78483",
+  "reading_date": "2026-09-12",
+  "issue_date": "2026-09-15",
+  "due_date": "2026-09-24",
+  "load_kw": "1",
+  "tariff_code": "A-1a(01)",
+  "electricity_charges": "38020.85",
+  "taxes": "10816.14",
+  "current_bill": "48836.99",
+  "total": "48837.00",
+  "july_units": "312",
+  "source": "User-supplied bill photo, visually read; itemized charges not present",
+  "verification": "photo_summary_checked; not a general tariff rule",
+  "reference_only": true
+}
