@@ -1,4 +1,7 @@
-import json, sqlite3, uuid
+import json, sqlite3, uuid, os
+from contextlib import contextmanager
+from decimal import DecimalException
+from werkzeug.exceptions import BadRequest, UnsupportedMediaType
 from datetime import datetime, timezone
 from pathlib import Path
 from flask import Flask, request, jsonify, render_template
@@ -7,12 +10,42 @@ from services.ocr import extract
 from services.estimate import energy_scenarios
 from services.budget import schedule, budget_plan, local_today, daily_appliance_guide
 from services.billing import number
-BASE=Path(__file__).parent
+BASE=Path(__file__).resolve().parent
 app=Flask(__name__)
 app.config['MAX_CONTENT_LENGTH']=10*1024*1024
-DB=BASE/'data'/'lesco.sqlite3'
+DB=Path(os.environ.get('LESCO_DB_PATH',str(BASE/'data'/'lesco.sqlite3')))
+@contextmanager
 def connection():
-    db=sqlite3.connect(DB); db.row_factory=sqlite3.Row; return db
+    db=sqlite3.connect(DB)
+    db.row_factory=sqlite3.Row
+    try:
+        with db:
+            yield db
+    finally:
+        db.close()
+
+
+def request_object():
+    try:
+        data=request.get_json()
+    except (BadRequest, UnsupportedMediaType):
+        raise ValueError('Send a valid JSON object.') from None
+    if not isinstance(data,dict):
+        raise ValueError('Send a JSON object.')
+    return data
+
+
+def object_field(data,key,default=None):
+    value=data.get(key,default)
+    if not isinstance(value,dict):
+        raise ValueError(key+' must be an object.')
+    return value
+
+
+def object_list(value,label):
+    if not isinstance(value,list) or any(not isinstance(item,dict) for item in value):
+        raise ValueError(label+' must be a list of objects.')
+    return value
 with connection() as db:
     db.executescript('''CREATE TABLE IF NOT EXISTS profiles(id TEXT PRIMARY KEY, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS ocr(id TEXT PRIMARY KEY, data TEXT NOT NULL, created TEXT NOT NULL);
@@ -25,6 +58,8 @@ def now(): return datetime.now(timezone.utc).isoformat()
 @app.errorhandler(TypeError)
 @app.errorhandler(ValueError)
 def invalid(e): return jsonify(error=str(e)),400
+@app.errorhandler(DecimalException)
+def numeric_range(e): return jsonify(error='Numbers exceed supported calculation precision.'),400
 @app.errorhandler(413)
 def large(e): return jsonify(error='Photo must be smaller than 10 MB.'),413
 @app.get('/')
@@ -45,12 +80,16 @@ def profile():
     if request.method=='GET':
         with connection() as db: row=db.execute('SELECT data FROM profiles WHERE id=?',('default',)).fetchone()
         return jsonify(json.loads(row['data']) if row else {})
-    data=request.get_json()
+    data=request_object()
     with connection() as db: db.execute('INSERT OR REPLACE INTO profiles VALUES(?,?)',('default',json.dumps(data)))
     return jsonify(saved=True)
 @app.post('/api/calculate')
 def calculate():
-    data=request.get_json(); reading=data['reading']
+    data=request_object(); reading=object_field(data,'reading')
+    object_field(data,'profile',{})
+    object_list(data.get('history',[]),'history')
+    if not isinstance(data.get('period'),str): raise ValueError('period must be a YYYY-MM string.')
+    if data.get('custom') is not None: object_field(data,'custom')
     if reading.get('source') not in ('manual','ocr'): raise ValueError('Select OCR or explicit manual fallback.')
     if reading['source']=='ocr':
         with connection() as db: row=db.execute('SELECT data FROM ocr WHERE id=?',(reading.get('ocr_id'),)).fetchone()
@@ -78,7 +117,7 @@ def bills():
     return jsonify([{'id':r['id'],'confirmed_at':r['confirmed_at'],'input':json.loads(r['input']),'result':json.loads(r['result'])} for r in rows])
 @app.post('/api/plan')
 def plan():
-    d=request.get_json(); return jsonify(appliance_plan(d['items'],d.get('budget'),d.get('rate'),d.get('fixed','0')))
+    d=request_object(); return jsonify(appliance_plan(object_list(d['items'],'items'),d.get('budget'),d.get('rate'),d.get('fixed','0')))
 @app.get('/api/dashboard')
 def dashboard():
     with connection() as db:
@@ -87,7 +126,7 @@ def dashboard():
     return jsonify(calendar=schedule(),observation=json.loads(row['data']) if row else None,budget=json.loads(pref['data']) if pref else {})
 @app.post('/api/budget')
 def budget():
-    data=request.get_json()
+    data=request_object()
     plan=budget_plan(data['target'],data['energy'],data.get('reserve'))
     if data.get('units') is not None:
         evidence=json.loads((BASE/'data/supplied-evidence.json').read_text())
