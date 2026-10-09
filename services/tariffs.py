@@ -26,8 +26,22 @@ def configured_charges(units, profile, category, period, snapshot):
         mode=config.get('energy_mode')
         if mode=='all_units': energy=units*number(band['rate'])
         elif mode=='progressive':
+            # Every consumed interval must be priced exactly once, starting at
+            # zero. A matching top band alone does not establish valid coverage.
+            ordered=sorted(bands,key=lambda b:number(b['lower_exclusive']))
+            end=Decimal(0)
+            for index,b in enumerate(ordered):
+                start=number(b['lower_exclusive'])
+                upper=number(b['upper_inclusive']) if b['upper_inclusive'] is not None else None
+                if start!=end or (upper is not None and upper<=start):
+                    return None,['contiguous non-overlapping progressive bands']
+                if upper is None and index!=len(ordered)-1:
+                    return None,['open-ended progressive band must be last']
+                end=upper
+            if end is not None and units>end:
+                return None,['complete progressive coverage']
             energy=Decimal(0)
-            for b in bands:
+            for b in ordered:
                 start=number(b['lower_exclusive']);end=units if b['upper_inclusive'] is None else min(units,number(b['upper_inclusive']))
                 if end>start:
                     if b.get('rate') is None:return None,['energy rate']

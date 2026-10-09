@@ -24,3 +24,44 @@ class APITests(unittest.TestCase):
         self.assertEqual(r.status_code,200)
         self.assertTrue(r.json['guide']['available'])
         self.assertEqual(len(r.json['guide']['items']),5)
+
+class InputValidationTests(unittest.TestCase):
+    setUp=APITests.setUp
+    tearDown=APITests.tearDown
+    def test_nonobject_json(self):
+        for endpoint in ['/api/calculate','/api/profile','/api/plan','/api/budget']:
+            for body in [None,[],5,'text']:
+                with self.subTest(endpoint=endpoint,body=body):
+                    self.assertEqual(self.client.post(endpoint,json=body).status_code,400)
+
+    def test_nested_calculation_shapes(self):
+        valid={'reading':{'source':'manual','previous':'10','current':'20','confirmed':True},'period':'2026-09'}
+        for key,value in [('reading',None),('reading',[]),('profile',[]),('history',{}),('history',[None]),('custom',[]),('period',202609)]:
+            with self.subTest(key=key,value=value):
+                self.assertEqual(self.client.post('/api/calculate',json={**valid,key:value}).status_code,400)
+        self.assertEqual(self.client.get('/api/bills').json,[])
+
+    def test_malformed_json(self):
+        self.assertEqual(self.client.post('/api/calculate',data='{bad',content_type='application/json').status_code,400)
+
+    def test_precision_overflow_is_client_error_and_not_saved(self):
+        body={'reading':{'source':'manual','previous':'0','current':'1e100','confirmed':True},'period':'2026-09','custom':{'rate':'2','fixed':'0'}}
+        self.assertEqual(self.client.post('/api/calculate',json=body).status_code,400)
+        self.assertEqual(self.client.get('/api/bills').json,[])
+
+    def test_invalid_crop_is_client_error(self):
+        import io,json
+        for crop in [[],{},[1,2],[0,0,5.5,10],[False,0,10,10],[0,0,0,10]]:
+            with self.subTest(crop=crop):
+                response=self.client.post('/api/ocr',data={'photo':(io.BytesIO(b'invalid'),'meter.png'),'crop':json.dumps(crop)})
+                self.assertEqual(response.status_code,400)
+
+    def test_connection_closes_after_rollback(self):
+        import sqlite3
+        with self.assertRaises(RuntimeError):
+            with module.connection() as db:
+                db.execute('INSERT INTO profiles VALUES(?,?)',('rollback','{}'))
+                raise RuntimeError('simulated failure')
+        with self.assertRaises(sqlite3.ProgrammingError):db.execute('SELECT 1')
+        with module.connection() as check:
+            self.assertEqual(check.execute('SELECT COUNT(*) FROM profiles').fetchone()[0],0)

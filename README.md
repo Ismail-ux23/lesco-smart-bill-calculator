@@ -60,3 +60,28 @@ Pakistan local date is populated automatically. The next issuance date follows t
 The supplied Rs. 48,837 bill is reference evidence only and is no longer rendered on the main screen. Its summary is stored separately in `data/reference-bill-september-2026.json`: Rs. 38,020.85 electricity charges plus Rs. 10,816.14 taxes, rounded from Rs. 48,836.99. The February-document base-energy comparison is Rs. 35,116.80. The Rs. 2,904.05 difference before taxes remains unallocated because the photo does not itemize surcharges/adjustments; it is not a fitted tariff.
 
 The daily appliance guide prices the entire planned cycle at the highest source energy band (Rs. 47.20/kWh), subtracts entered units, and divides remaining units by days to the user-stated issuance date. This avoids treating only extra units as expensive after a band crossing. It is deliberately a conservative base-energy illustration, not an official bill cap. An optional user reserve remains necessary for unknown other charges. Starter assumptions: one fridge at 1.2 kWh/day (cycling), one 60 W fan for 8 hours, four 10 W LEDs for 5 hours; remaining allowance goes to one AC at editable 1500 W average power. AC minutes are rounded down. If essentials exceed the allowance the UI explicitly flags the shortfall instead of advising refrigeration shutdown. Other appliances need energy deducted from this shared allocation. Actual cycle alignment is unverified; an issuance date is not a meter-reading cutoff.
+
+## Request and tariff-rule validation
+
+Malformed/non-object JSON, invalid nested reading/profile/history shapes and
+invalid OCR crops return 400 instead of uncaught server errors. Explicit crop
+coordinates must be four finite whole numbers: nonnegative x/y and positive
+width/height within the oriented image. Images above 20 million pixels are
+rejected before decoding their full pixel data. Arithmetic that exceeds Decimal
+precision returns 400 without storing a bill.
+
+Progressive synthetic/verified rule configurations must have contiguous,
+non-overlapping bands starting at zero; invalid coverage produces an incomplete
+configuration result rather than silently missing or double-charging units.
+These checks do not establish that a configuration is an official tariff.
+
+SQLite connections now close after reads/writes and roll back failed
+transactions. `LESCO_DB_PATH` can select a different existing database location;
+its parent directory must exist. No schema migration is required.
+
+GitHub Actions runs the regression suite on Python 3.12. OCR tests use generated
+images and mocked Tesseract output to verify crop/candidate handling. A local
+synthetic-image smoke check can exercise the installed Tesseract binary; this
+does not establish real meter-photo accuracy. Current-month tariff applicability
+and adjustments remain unverified; the February document stays a labelled
+historical comparison and the official snapshot stays draft.

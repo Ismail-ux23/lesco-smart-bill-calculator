@@ -19,3 +19,23 @@ class TariffTests(unittest.TestCase):
         s=self.fixture();s['zero_consumption']['Single']='0'
         r,m=configured_charges(Decimal(0),{'phase':'Single'},'protected','2026-09',s)
         self.assertEqual(r['total'],'0.00')
+
+class ProgressiveCoverageTests(unittest.TestCase):
+    fixture=TariffTests.fixture
+    def test_gap_below_selected_band_cannot_undercharge(self):
+        s=self.fixture();s['categories']['protected']['bands'][0]['upper_inclusive']=50
+        result,missing=configured_charges(Decimal(150),{'load_kw':2},'protected','2026-09',s)
+        self.assertIsNone(result);self.assertIn('contiguous non-overlapping progressive bands',missing)
+
+    def test_overlap_below_selected_band_cannot_double_charge(self):
+        s=self.fixture();s['categories']['protected']['bands']=[
+            {'lower_exclusive':0,'upper_inclusive':100,'rate':'1'},
+            {'lower_exclusive':50,'upper_inclusive':100,'rate':'2'},
+            {'lower_exclusive':100,'upper_inclusive':200,'rate':'3'}]
+        result,missing=configured_charges(Decimal(150),{'load_kw':2},'protected','2026-09',s)
+        self.assertIsNone(result);self.assertTrue(missing)
+
+    def test_unordered_complete_bands_still_work(self):
+        s=self.fixture();s['categories']['protected']['bands'].reverse()
+        result,missing=configured_charges(Decimal(150),{'load_kw':2},'protected','2026-09',s)
+        self.assertEqual(result['total'],'224.40');self.assertEqual(missing,[])

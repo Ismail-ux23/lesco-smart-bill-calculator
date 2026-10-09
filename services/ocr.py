@@ -1,17 +1,35 @@
 import io, re
 
+def validate_crop(crop):
+    if crop is None: return None
+    if not isinstance(crop,list) or len(crop)!=4: raise ValueError('Crop must contain x, y, width and height.')
+    values=[]
+    for value in crop:
+        if isinstance(value,bool): raise ValueError('Crop coordinates must be whole numbers.')
+        try:
+            number=float(value)
+            if not number.is_integer(): raise ValueError()
+            values.append(int(number))
+        except (ValueError,TypeError,OverflowError): raise ValueError('Crop coordinates must be finite whole numbers.') from None
+    x,y,width,height=values
+    if min(x,y)<0 or min(width,height)<=0: raise ValueError('Crop origin must be nonnegative and dimensions positive.')
+    return values
+
+
 def extract(image_bytes, crop=None, precision=3):
-    if not 0 <= precision <= 6: raise ValueError('Register precision must be between 0 and 6.')
+    crop=validate_crop(crop)
+    if not isinstance(precision,int) or isinstance(precision,bool) or not 0 <= precision <= 6: raise ValueError('Register precision must be between 0 and 6.')
     import cv2
     import numpy as np
     import pytesseract
     from PIL import Image, ImageOps
     Image.MAX_IMAGE_PIXELS = 20000000
     try:
-        source = Image.open(io.BytesIO(image_bytes))
-        if source.format not in ('JPEG','PNG','WEBP'): raise ValueError('Use a JPEG, PNG or WebP photo.')
-        source.load()
-        img=ImageOps.exif_transpose(source).convert('RGB')
+        with Image.open(io.BytesIO(image_bytes)) as source:
+            if source.format not in ('JPEG','PNG','WEBP'): raise ValueError('Use a JPEG, PNG or WebP photo.')
+            if source.width*source.height>Image.MAX_IMAGE_PIXELS: raise ValueError('Image exceeds 20 million pixels.')
+            source.load()
+            img=ImageOps.exif_transpose(source).convert('RGB')
     except Exception as exc: raise ValueError('Invalid or oversized image: ' + str(exc))
     w,h=img.size
     if crop:
